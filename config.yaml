@@ -1,0 +1,38 @@
+timezone: "Europe/Brussels"
+capture_interval_seconds: 60
+upload_time: "00:05"
+
+retry:
+  camera_backoff_start_seconds: 30
+  camera_backoff_max_seconds: 300
+  network_backoff_start_seconds: 60
+  network_backoff_max_seconds: 3600
+  upload_max_retries: 3
+  upload_retry_spacing_seconds: 60
+  max_consecutive_camera_failures: 10
+
+disk:
+  min_free_disk_mb: 500
+  retention_days: 7
+
+cameras:
+  - id: cam01
+    name: "Hoboken North"
+    type: http
+    snapshot_url: "http://100.66.241.XXX/snapshot.jpg"
+    timeout_seconds: 10
+    auth:
+      username: ""
+      password: ""
+  - id: cam02
+    name: "Hoboken South"
+    type: http
+    snapshot_url: "http://100.66.241.YYY/snapshot.jpg"
+    timeout_seconds: 10
+
+nextcloud:
+  base_path: "Werf Hoboken/timelapses"
+
+local_storage:
+  path: "/data/images"
+  state_path: "/data/state"

@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  capture-app:
+    build: .
+    container_name: camera-capture
+    restart: always
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    env_file:
+      - .env
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./lennert-hoboken.conf:/etc/wireguard/wg0.conf:ro
+      - capture_data:/data
+    healthcheck:
+      test: ["CMD", "/app/scripts/healthcheck.sh"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  capture_data:
