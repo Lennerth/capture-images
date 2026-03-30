@@ -30,7 +30,9 @@ cameras:
     snapshot_url: "http://100.66.241.YYY/snapshot.jpg"
     timeout_seconds: 10
 
-nextcloud:
+s3:
+  endpoint_url: "https://s3.slices-be.eu"
+  bucket: "ilabt.imec.be-project-coock-aida"
   base_path: "Werf Hoboken/timelapses"
 
 local_storage:

@@ -11,7 +11,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 
 from camera import create_camera
-from uploader import NextcloudUploader
+from uploader import S3Uploader
 from health import HealthMonitor, RetryManager
 
 # Configure logging
@@ -32,7 +32,7 @@ class CameraService:
         
         self.health_monitor = HealthMonitor(self.config)
         self.retry_manager = RetryManager(self.config)
-        self.uploader = NextcloudUploader(self.config)
+        self.uploader = S3Uploader(self.config)
         
         self.cameras = [create_camera(c_conf) for c_conf in self.config.get("cameras", [])]
         self.local_storage_path = self.config.get("local_storage", {}).get("path", "/data/images")

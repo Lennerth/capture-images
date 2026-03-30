@@ -7,7 +7,7 @@ Here is the exact current behavior:
 1. **WireGuard startup attempt:** On container start, it tries to bring up WireGuard using `/etc/wireguard/wg0.conf`.
 2. **Scheduled camera snapshots:** It calls the configured HTTP snapshot URL for each camera on a schedule from `config.yaml`.
 3. **Daily local folders:** It stores images in daily folders such as `27_03_26`, using filenames like `cam_cam01_14-30-00.jpg`.
-4. **Daily Nextcloud upload:** At the configured upload time, it uploads every non-current day folder to Nextcloud WebDAV under `Werf Hoboken/timelapses/DD_MM_YY/`.
+4. **Daily Slices S3 upload:** At the configured upload time, it uploads every non-current day folder to the Slices S3 bucket under `Werf Hoboken/timelapses/DD_MM_YY/`.
 5. **State tracking:** It stores upload and health state in `/data/state/upload_manifest.json` and `/data/state/health.json`.
 6. **Safety behavior:**
    - It skips captures if free disk space drops below the configured minimum.
@@ -19,7 +19,7 @@ Important limits of the current code:
 - If WireGuard startup fails, the app still continues and logs a warning.
 - The health check tests VPN reachability to `100.66.241.254`, process liveness, and stale health state.
 - `restart: always` restarts the container if the main process exits. An `unhealthy` status alone does not guarantee a restart in plain Docker Compose.
-- The current uploader expects authenticated WebDAV credentials. A public share link by itself is not enough.
+- The current uploader expects S3 access keys.
 
 ---
 
@@ -30,9 +30,8 @@ You need all of the following:
 - Your WireGuard `.conf` file
 - Your camera HTTP snapshot URLs
 - Any camera usernames/passwords, if the cameras require login
-- Your Nextcloud username
-- Your Nextcloud app password or account password
-- Your Nextcloud authenticated WebDAV base URL
+- Your Slices S3 access key
+- Your Slices S3 secret key
 
 If any one of those is missing, the service may start, but it will not work fully.
 
@@ -52,28 +51,17 @@ So do one of these:
 
 If you do nothing here, the app will still start, but it will log that it is proceeding without VPN.
 
-### Step 2: Create the `.env` file for Nextcloud
+### Step 2: Create the `.env` file for S3 credentials
 The code reads cloud credentials from a file named `.env`.
 
 Do this:
 1. Copy `.env.example` to `.env`.
 2. Open `.env`.
-3. Fill in all three values.
+3. Fill in both values.
 
 What each value means:
-- `NEXTCLOUD_USER`: your Nextcloud username
-- `NEXTCLOUD_PASSWORD`: your Nextcloud app password or login password
-- `NEXTCLOUD_BASE_URL`: your authenticated WebDAV base URL
-
-Example WebDAV URL:
-```text
-https://cloud.ilabt.imec.be/remote.php/dav/files/YOUR_USERNAME/
-```
-
-Important:
-- Replace `YOUR_USERNAME` in that URL with your real username.
-- A public share URL is not enough for the current code.
-- The current uploader checks for both a base URL and credentials before it will upload anything.
+- `S3_ACCESS_KEY`: your Slices S3 access key
+- `S3_SECRET_KEY`: your Slices S3 secret key
 
 ### Step 3: Fill in `config.yaml`
 This file controls when the service runs, which cameras it calls, and where it stores data.
@@ -130,15 +118,17 @@ cameras:
       password: ""
 ```
 
-#### Nextcloud target path
-This is the folder path inside your WebDAV root:
+#### S3 target path
+This is the object prefix path inside your bucket:
 
 ```yaml
-nextcloud:
+s3:
+  endpoint_url: "https://s3.slices-be.eu"
+  bucket: "ilabt.imec.be-project-coock-aida"
   base_path: "Werf Hoboken/timelapses"
 ```
 
-The code will create the missing folders in that path, then create one day folder under it.
+The code will upload objects to this bucket using the `base_path` as a prefix.
 
 #### Local storage paths
 These are the in-container storage locations:
@@ -194,7 +184,8 @@ Inside that volume:
 - `/data/state/health.json` tracks last successful capture and upload times
 
 Remote files are uploaded to:
-- `NEXTCLOUD_BASE_URL` + `Werf Hoboken/timelapses/DD_MM_YY/`
+- S3 Bucket: `ilabt.imec.be-project-coock-aida`
+- Object prefix: `Werf Hoboken/timelapses/DD_MM_YY/`
 
 ---
 
@@ -210,9 +201,8 @@ Check these first:
 ### "Uploads never happen"
 Check these:
 1. Is `.env` present?
-2. Are `NEXTCLOUD_USER`, `NEXTCLOUD_PASSWORD`, and `NEXTCLOUD_BASE_URL` all filled in?
-3. Is `NEXTCLOUD_BASE_URL` an authenticated WebDAV URL and not a public share link?
-4. Did the local images land in a non-current day folder yet?
+2. Are `S3_ACCESS_KEY` and `S3_SECRET_KEY` filled in?
+3. Did the local images land in a non-current day folder yet?
 
 ### "The container is unhealthy"
 The current health check marks the container unhealthy if:
