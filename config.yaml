@@ -28,9 +28,14 @@ cameras:
       username: ""
       password: ""
   - id: cam02
-    name: "Hoboken South"
+    name: "Hoboken Central"
     type: http
     snapshot_url: "http://100.66.241.YYY/snapshot.jpg"
+    timeout_seconds: 10
+  - id: cam03
+    name: "Hoboken South"
+    type: https
+    snapshot_url: "http://100.66.241.ZZZ/snapshot.jpg"
     timeout_seconds: 10
 
 s3:
