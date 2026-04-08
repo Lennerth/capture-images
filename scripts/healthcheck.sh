@@ -3,8 +3,7 @@
 # Check VPN connectivity if interface exists
 if ip link show wg0 > /dev/null 2>&1; then
     if ! ping -c 1 -W 2 100.66.241.254 > /dev/null 2>&1; then
-        echo "VPN is down."
-        exit 1
+        echo "VPN is down (diagnostic only, not failing healthcheck)."
     fi
 fi
 

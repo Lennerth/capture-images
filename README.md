@@ -5,19 +5,19 @@ This service runs inside a Docker container and automates camera snapshots plus 
 
 Here is the exact current behavior:
 1. **WireGuard startup attempt:** On container start, it tries to bring up WireGuard using `/etc/wireguard/wg0.conf`.
-2. **Scheduled camera snapshots:** It calls the configured HTTP snapshot URL for each camera on a schedule from `config.yaml`.
+2. **Scheduled camera snapshots:** It concurrently calls the configured HTTP snapshot URL for each camera between the daytime window (e.g. 07:00 to 19:00), aligned exactly to wall-clock seconds (e.g. `HH:MM:00`).
 3. **Daily local folders:** It stores images in daily folders such as `27_03_26`, using filenames like `cam_cam01_14-30-00.jpg`.
 4. **Daily Slices S3 upload:** At the configured upload time, it uploads every non-current day folder to the Slices S3 bucket under `Werf Hoboken/timelapses/DD_MM_YY/`.
 5. **State tracking:** It stores upload and health state in `/data/state/upload_manifest.json` and `/data/state/health.json`.
 6. **Safety behavior:**
    - It skips captures if free disk space drops below the configured minimum.
-   - It uses exponential backoff for global network failure detection.
+   - It uses exponential backoff for true network failures, but handles camera failures independently.
    - It reduces retry frequency for cameras that keep failing repeatedly.
    - It deletes old local folders only after they were fully uploaded and passed the retention window.
 
 Important limits of the current code:
 - If WireGuard startup fails, the app still continues and logs a warning.
-- The health check tests VPN reachability to `100.66.241.254`, process liveness, and stale health state.
+- The health check tests process liveness and stale health state. The VPN reachability ping is only diagnostic and does not fail the container.
 - `restart: always` restarts the container if the main process exits. An `unhealthy` status alone does not guarantee a restart in plain Docker Compose.
 - The current uploader expects S3 access keys.
 
@@ -70,12 +70,16 @@ This file controls when the service runs, which cameras it calls, and where it s
 - `timezone`: timezone used for timestamps, daily folder naming, and upload scheduling
 - `capture_interval_seconds`: how often to take pictures
 - `upload_time`: what time to upload completed day folders
+- `capture_window`: the time window when captures are allowed (start is inclusive, end is exclusive)
 
 Example:
 ```yaml
 timezone: "Europe/Brussels"
 capture_interval_seconds: 60
 upload_time: "00:05"
+capture_window:
+  start: "07:00"
+  end: "19:00"
 ```
 
 #### Retry settings
@@ -206,9 +210,14 @@ Check these:
 
 ### "The container is unhealthy"
 The current health check marks the container unhealthy if:
-- the `wg0` interface exists but `100.66.241.254` cannot be pinged
 - the main process is gone
 - `/data/state/health.json` becomes stale
+
+*(Note: a failed VPN ping to `100.66.241.254` is logged as a warning but does NOT mark the container unhealthy anymore).*
+
+### "I want to manually check the VPN ping"
+If you want to diagnose the WireGuard connection manually from inside the container, run:
+`docker compose exec capture-app ping -c 3 100.66.241.254`
 
 ### "Where did my disk space go?"
 Images accumulate under `/data/images`. They are only deleted locally after:

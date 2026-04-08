@@ -1,6 +1,9 @@
 timezone: "Europe/Brussels"
 capture_interval_seconds: 60
 upload_time: "00:05"
+capture_window:
+  start: "07:00"
+  end: "19:00"
 
 retry:
   camera_backoff_start_seconds: 30
