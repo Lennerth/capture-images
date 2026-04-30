@@ -5,17 +5,12 @@ services:
     build: .
     container_name: camera-capture
     restart: always
-    cap_add:
-      - NET_ADMIN
-    devices:
-      - /dev/net/tun
     env_file:
       - .env
     environment:
       - NVR_HOST=${NVR_HOST:-192.168.1.229}
     volumes:
       - ./config.yaml:/app/config.yaml:ro
-      - ./lennert-hoboken.conf:/etc/wireguard/wg0.conf:ro
       - capture_data:/data
     healthcheck:
       test: ["CMD", "/app/scripts/healthcheck.sh"]

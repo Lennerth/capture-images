@@ -1,9 +1,7 @@
 FROM python:3.11-slim
 
-# Install WireGuard, ping, and ffmpeg
+# Install ping and ffmpeg
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    wireguard-tools \
-    iproute2 \
     iputils-ping \
     jq \
     ffmpeg \
@@ -19,8 +17,5 @@ RUN chmod +x scripts/*.sh
 
 COPY src/ src/
 COPY config.yaml .
-
-# Provide a default placeholder if not mounted
-RUN mkdir -p /etc/wireguard
 
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]

@@ -5,7 +5,6 @@ Every minute during daylight hours, it grabs a JPEG from each camera through the
 
 ## What You Need Before You Start
 - **Docker** and **Docker Compose** installed on your Linux machine.
-- Your **WireGuard `.conf` file** (for the S3 upload connection).
 - The **NVR IP address, username, and password**.
 - Your **Slices S3 access key and secret key**.
 
@@ -19,12 +18,7 @@ git clone <repo url>
 cd "capture images"
 ```
 
-### Step 2: Drop in the WireGuard config
-The container needs your WireGuard configuration to upload to S3.
-Rename your WireGuard config file to `lennert-hoboken.conf` and place it in the project root.
-*(Alternatively, edit `docker-compose.yml` to mount your specific filename).*
-
-### Step 3: Create `.env`
+### Step 2: Create `.env`
 Copy the example environment file and fill in your secrets.
 ```bash
 cp .env.example .env
@@ -34,20 +28,20 @@ Open `.env` and fill in:
 - `S3_SECRET_KEY`
 - `NVR_PASSWORD`
 
-### Step 4: Edit `config.yaml`
+### Step 3: Edit `config.yaml`
 Open `config.yaml` to configure your NVR and cameras.
 1. Under `nvr:`, set `host` (e.g., `"192.168.1.229"`) and `username`.
-2. Under `cameras:`, list your cameras. Set `type: nvr_rtsp` and assign a `channel` number (e.g., 1, 2, 3) to each. You can leave the placeholder channel numbers for now and fix them in Step 6.
+2. Under `cameras:`, list your cameras. Set `type: nvr_rtsp` and assign a `channel` number (e.g., 1, 2, 3) to each. You can leave the placeholder channel numbers for now and fix them in Step 5.
 3. Optionally adjust `timezone`, `capture_window`, and `upload_time`.
 
-### Step 5: Build and start
+### Step 4: Build and start
 ```bash
 docker compose up -d --build
 docker compose logs -f capture-app
 ```
 Watch the logs. Success looks like log lines for each camera saying it captured the channel to `/data/images/...`. Press `Ctrl+C` to exit the logs (the container keeps running).
 
-### Step 6: Verify channel mapping
+### Step 5: Verify channel mapping
 You need to make sure channel 1 is actually the camera you think it is.
 Run the included test script:
 ```bash
@@ -58,7 +52,7 @@ This will download `channel_1.jpg`, `channel_2.jpg`, etc. to your current folder
 docker compose restart capture-app
 ```
 
-### Step 7: Confirm S3 upload
+### Step 6: Confirm S3 upload
 To test the upload without waiting until midnight:
 1. Open `config.yaml` and change `upload_time` to 5 minutes from now.
 2. `docker compose restart capture-app`
@@ -67,7 +61,7 @@ To test the upload without waiting until midnight:
 
 ---
 
-## Step 8: Day-to-Day Operations
+## Step 7: Day-to-Day Operations
 
 - **View logs:** `docker compose logs -f capture-app`
 - **Restart service:** `docker compose restart capture-app`
@@ -104,12 +98,11 @@ Because this is a Xiongmai-based NVR, you should lock it down:
 ---
 
 ## What the Code Does Internally (For Power Users)
-1. **WireGuard startup:** On container start, it tries to bring up WireGuard using `/etc/wireguard/wg0.conf`.
-2. **Scheduled camera snapshots:** It concurrently pulls a single RTSP frame using `ffmpeg` for each camera between the daytime window, aligned exactly to wall-clock seconds.
-3. **Daily local folders:** It stores images in daily folders such as `27_03_26`, using filenames like `cam_cam01_14-30-00.jpg`.
-4. **Daily Slices S3 upload:** At the configured upload time, it uploads every non-current day folder to the Slices S3 bucket under `Werf Hoboken/timelapses/DD_MM_YY/`.
-5. **State tracking:** It stores upload and health state in `/data/state/upload_manifest.json` and `/data/state/health.json`.
-6. **Safety behavior:**
+1. **Scheduled camera snapshots:** It concurrently pulls a single RTSP frame using `ffmpeg` for each camera between the daytime window, aligned exactly to wall-clock seconds.
+2. **Daily local folders:** It stores images in daily folders such as `27_03_26`, using filenames like `cam_cam01_14-30-00.jpg`.
+3. **Daily Slices S3 upload:** At the configured upload time, it uploads every non-current day folder to the Slices S3 bucket under `Werf Hoboken/timelapses/DD_MM_YY/`.
+4. **State tracking:** It stores upload and health state in `/data/state/upload_manifest.json` and `/data/state/health.json`.
+5. **Safety behavior:**
    - It skips captures if free disk space drops below the configured minimum.
    - It uses exponential backoff for true network failures, but handles camera failures independently.
    - It reduces retry frequency for cameras that keep failing repeatedly.
