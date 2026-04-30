@@ -26,9 +26,68 @@ def load_config(config_path="config.yaml"):
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
 
+def _validate_config(cfg: dict):
+    errors = []
+    seen_ids = set()
+    
+    cameras = cfg.get("cameras", [])
+    nvr_cfg = cfg.get("nvr", {})
+    has_nvr_camera = False
+    
+    for i, cam in enumerate(cameras):
+        cam_id = cam.get("id")
+        if not cam_id:
+            errors.append(f"Camera at index {i} is missing an 'id'.")
+        else:
+            if cam_id in seen_ids:
+                errors.append(f"Duplicate camera id found: {cam_id}")
+            seen_ids.add(cam_id)
+            
+        cam_type = cam.get("type", "http").lower()
+        if cam_type not in ["http", "https", "nvr_rtsp"]:
+            errors.append(f"Camera '{cam_id}' has unsupported type: {cam_type}")
+            
+        timeout = cam.get("timeout_seconds", 10)
+        if not isinstance(timeout, (int, float)) or timeout <= 0:
+            errors.append(f"Camera '{cam_id}' has invalid timeout_seconds: {timeout}")
+            
+        if cam_type == "nvr_rtsp":
+            has_nvr_camera = True
+            channel = cam.get("channel")
+            if not isinstance(channel, int) or channel <= 0:
+                errors.append(f"Camera '{cam_id}' (nvr_rtsp) must have a positive integer 'channel'.")
+            if "snapshot_url" in cam:
+                logger.warning(f"Typo guard: Camera '{cam_id}' (nvr_rtsp) has 'snapshot_url' set, which will be ignored.")
+        elif cam_type in ["http", "https"]:
+            if "channel" in cam:
+                logger.warning(f"Typo guard: Camera '{cam_id}' ({cam_type}) has 'channel' set, which will be ignored.")
+
+    if has_nvr_camera:
+        host = os.environ.get("NVR_HOST") or nvr_cfg.get("host")
+        if not host:
+            errors.append("NVR host is missing. Set NVR_HOST env var or nvr.host in config.")
+        if not nvr_cfg.get("username"):
+            errors.append("NVR username is missing in config.")
+            
+        password = os.environ.get("NVR_PASSWORD") or nvr_cfg.get("password")
+        if not password:
+            errors.append("NVR password is missing. Set NVR_PASSWORD env var or nvr.password in config.")
+            
+        template = nvr_cfg.get("url_template", "")
+        if template:
+            for req in ["{host}", "{port}", "{channel}"]:
+                if req not in template:
+                    errors.append(f"NVR url_template must contain {req}")
+            if "{user}" not in template and "{password}" not in template:
+                errors.append("NVR url_template must contain at least one of {user} or {password}")
+
+    if errors:
+        raise ValueError("Configuration validation failed:\n" + "\n".join(errors))
+
 class CameraService:
     def __init__(self, config_path="config.yaml"):
         self.config = load_config(config_path)
+        _validate_config(self.config)
         self.tz = pytz.timezone(self.config.get("timezone", "Europe/Brussels"))
         
         capture_window = self.config.get("capture_window", {})
@@ -39,7 +98,7 @@ class CameraService:
         self.retry_manager = RetryManager(self.config)
         self.uploader = S3Uploader(self.config)
         
-        self.cameras = [create_camera(c_conf) for c_conf in self.config.get("cameras", [])]
+        self.cameras = [create_camera(c_conf, self.config.get("nvr")) for c_conf in self.config.get("cameras", [])]
         self.local_storage_path = self.config.get("local_storage", {}).get("path", "/data/images")
         
         self.scheduler = BackgroundScheduler(timezone=self.tz)

@@ -11,6 +11,8 @@ services:
       - /dev/net/tun
     env_file:
       - .env
+    environment:
+      - NVR_HOST=${NVR_HOST:-192.168.1.229}
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./lennert-hoboken.conf:/etc/wireguard/wg0.conf:ro

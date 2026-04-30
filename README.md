@@ -1,11 +1,111 @@
-# Camera Capture Cron Service
+# NVR Camera Capture Service
 
 ## What This Code Does
-This service runs inside a Docker container and automates camera snapshots plus daily cloud upload.
+Every minute during daylight hours, it grabs a JPEG from each camera through the on-site NVR, stores it in dated folders, and uploads each completed day to S3.
 
-Here is the exact current behavior:
-1. **WireGuard startup attempt:** On container start, it tries to bring up WireGuard using `/etc/wireguard/wg0.conf`.
-2. **Scheduled camera snapshots:** It concurrently calls the configured HTTP snapshot URL for each camera between the daytime window (e.g. 07:00 to 19:00), aligned exactly to wall-clock seconds (e.g. `HH:MM:00`).
+## What You Need Before You Start
+- **Docker** and **Docker Compose** installed on your Linux machine.
+- Your **WireGuard `.conf` file** (for the S3 upload connection).
+- The **NVR IP address, username, and password**.
+- Your **Slices S3 access key and secret key**.
+
+---
+
+## Step-By-Step Setup
+
+### Step 1: Clone the repo
+```bash
+git clone <repo url>
+cd "capture images"
+```
+
+### Step 2: Drop in the WireGuard config
+The container needs your WireGuard configuration to upload to S3.
+Rename your WireGuard config file to `lennert-hoboken.conf` and place it in the project root.
+*(Alternatively, edit `docker-compose.yml` to mount your specific filename).*
+
+### Step 3: Create `.env`
+Copy the example environment file and fill in your secrets.
+```bash
+cp .env.example .env
+```
+Open `.env` and fill in:
+- `S3_ACCESS_KEY`
+- `S3_SECRET_KEY`
+- `NVR_PASSWORD`
+
+### Step 4: Edit `config.yaml`
+Open `config.yaml` to configure your NVR and cameras.
+1. Under `nvr:`, set `host` (e.g., `"192.168.1.229"`) and `username`.
+2. Under `cameras:`, list your cameras. Set `type: nvr_rtsp` and assign a `channel` number (e.g., 1, 2, 3) to each. You can leave the placeholder channel numbers for now and fix them in Step 6.
+3. Optionally adjust `timezone`, `capture_window`, and `upload_time`.
+
+### Step 5: Build and start
+```bash
+docker compose up -d --build
+docker compose logs -f capture-app
+```
+Watch the logs. Success looks like log lines for each camera saying it captured the channel to `/data/images/...`. Press `Ctrl+C` to exit the logs (the container keeps running).
+
+### Step 6: Verify channel mapping
+You need to make sure channel 1 is actually the camera you think it is.
+Run the included test script:
+```bash
+bash scripts/test_channels.sh 1 2 3 4
+```
+This will download `channel_1.jpg`, `channel_2.jpg`, etc. to your current folder. Open them and look at the images. If the names in `config.yaml` don't match the views, update the `channel:` numbers in `config.yaml`, then restart the service:
+```bash
+docker compose restart capture-app
+```
+
+### Step 7: Confirm S3 upload
+To test the upload without waiting until midnight:
+1. Open `config.yaml` and change `upload_time` to 5 minutes from now.
+2. `docker compose restart capture-app`
+3. Wait for the time to pass and check your S3 bucket.
+4. Change `upload_time` back to `"00:05"` and restart again.
+
+---
+
+## Step 8: Day-to-Day Operations
+
+- **View logs:** `docker compose logs -f capture-app`
+- **Restart service:** `docker compose restart capture-app`
+- **Stop service:** `docker compose down`
+- **Stop and wipe all local data:** `docker compose down -v`
+
+---
+
+## Troubleshooting
+
+- **"All captures fail with timeout"**
+  The NVR might use a different RTSP URL format. Open `config.yaml` and try changing `url_template` to one of these alternatives:
+  - `rtsp://{user}:{password}@{host}:{port}/h264/ch{channel}/main/av_stream`
+  - `rtsp://{user}:{password}@{host}:{port}/user={user}&password={password}&channel={channel}&stream={subtype}.sdp`
+  Also, try increasing `timeout_seconds` from 15 to 20. (The timeout needs to be high enough to wait for the next video keyframe).
+
+- **"Some channels show the wrong camera view"**
+  Re-run `bash scripts/test_channels.sh 1 2 3 4`, check the JPEGs, and fix the `channel:` numbers in `config.yaml`.
+
+- **"The container is unhealthy"**
+  This means captures have been failing for a while and `health.json` is stale. Check the logs (`docker compose logs --tail=100 capture-app`) to see why ffmpeg is failing.
+
+- **"Uploads never happen"**
+  Check that your `.env` file exists and has the correct S3 keys. Also, uploads only process *completed* day folders (yesterday or older).
+
+---
+
+## Security Notes for the NVR
+Because this is a Xiongmai-based NVR, you should lock it down:
+1. **Disable Cloud:** In the NVR UI, go to Network → Advanced → Cloud (or "P2P") and disable XMEye/Cloud connectivity.
+2. **Block Internet:** Block the NVR from outbound internet access at your router/gateway. Only allow NTP (UDP 123) outbound.
+3. **Change Passwords:** Change the default admin password on the device.
+
+---
+
+## What the Code Does Internally (For Power Users)
+1. **WireGuard startup:** On container start, it tries to bring up WireGuard using `/etc/wireguard/wg0.conf`.
+2. **Scheduled camera snapshots:** It concurrently pulls a single RTSP frame using `ffmpeg` for each camera between the daytime window, aligned exactly to wall-clock seconds.
 3. **Daily local folders:** It stores images in daily folders such as `27_03_26`, using filenames like `cam_cam01_14-30-00.jpg`.
 4. **Daily Slices S3 upload:** At the configured upload time, it uploads every non-current day folder to the Slices S3 bucket under `Werf Hoboken/timelapses/DD_MM_YY/`.
 5. **State tracking:** It stores upload and health state in `/data/state/upload_manifest.json` and `/data/state/health.json`.
@@ -14,217 +114,3 @@ Here is the exact current behavior:
    - It uses exponential backoff for true network failures, but handles camera failures independently.
    - It reduces retry frequency for cameras that keep failing repeatedly.
    - It deletes old local folders only after they were fully uploaded and passed the retention window.
-
-Important limits of the current code:
-- If WireGuard startup fails, the app still continues and logs a warning.
-- The health check tests process liveness and stale health state. The VPN reachability ping is only diagnostic and does not fail the container.
-- `restart: always` restarts the container if the main process exits. An `unhealthy` status alone does not guarantee a restart in plain Docker Compose.
-- The current uploader expects S3 access keys.
-
----
-
-## What You Need Before Starting
-You need all of the following:
-- **Docker** and **Docker Compose**
-- A Docker environment that supports Linux containers, `NET_ADMIN`, and `/dev/net/tun`
-- Your WireGuard `.conf` file
-- Your camera HTTP snapshot URLs
-- Any camera usernames/passwords, if the cameras require login
-- Your Slices S3 access key
-- Your Slices S3 secret key
-
-If any one of those is missing, the service may start, but it will not work fully.
-
----
-
-## Step-By-Step Setup
-
-### Step 1: Put the VPN file in the right place
-The container expects the WireGuard file to be mounted from the project folder.
-
-Right now, `docker-compose.yml` is hard-coded to use this exact filename:
-- `lennert-hoboken.conf`
-
-So do one of these:
-1. Rename your WireGuard config file to `lennert-hoboken.conf` and place it in the project root.
-2. Or edit `docker-compose.yml` yourself so it mounts your real filename to `/etc/wireguard/wg0.conf`.
-
-If you do nothing here, the app will still start, but it will log that it is proceeding without VPN.
-
-### Step 2: Create the `.env` file for S3 credentials
-The code reads cloud credentials from a file named `.env`.
-
-Do this:
-1. Copy `.env.example` to `.env`.
-2. Open `.env`.
-3. Fill in both values.
-
-What each value means:
-- `S3_ACCESS_KEY`: your Slices S3 access key
-- `S3_SECRET_KEY`: your Slices S3 secret key
-
-### Step 3: Fill in `config.yaml`
-This file controls when the service runs, which cameras it calls, and where it stores data.
-
-#### Basic settings
-- `timezone`: timezone used for timestamps, daily folder naming, and upload scheduling
-- `capture_interval_seconds`: how often to take pictures
-- `upload_time`: what time to upload completed day folders
-- `capture_window`: the time window when captures are allowed (start is inclusive, end is exclusive)
-
-Example:
-```yaml
-timezone: "Europe/Brussels"
-capture_interval_seconds: 60
-upload_time: "00:05"
-capture_window:
-  start: "07:00"
-  end: "19:00"
-```
-
-#### Retry settings
-These control retry-related behavior:
-- `network_backoff_start_seconds`: first wait time after a full network failure
-- `network_backoff_max_seconds`: longest wait time for repeated network failures
-- `upload_max_retries`: how many times to retry a single upload
-- `upload_retry_spacing_seconds`: wait between upload retries
-- `max_consecutive_camera_failures`: after this many failures, a camera gets skipped on most cycles
-
-Notes:
-- The current code does use global network backoff.
-- The current code does **not** implement true per-camera exponential backoff, even if similar keys exist in the config template.
-
-#### Disk and retention settings
-- `min_free_disk_mb`: below this free space, captures stop
-- `retention_days`: fully uploaded day folders older than this are deleted locally
-
-#### Camera settings
-You need one entry per camera.
-
-For each camera:
-- `id`: short unique ID, best without spaces
-- `name`: human-readable label
-- `type`: currently `http`
-- `snapshot_url`: full snapshot URL
-- `timeout_seconds`: request timeout
-- `auth.username` and `auth.password`: optional camera login
-
-Example:
-```yaml
-cameras:
-  - id: cam01
-    name: "Hoboken North"
-    type: http
-    snapshot_url: "http://100.66.241.123/snapshot.jpg"
-    timeout_seconds: 10
-    auth:
-      username: ""
-      password: ""
-```
-
-#### S3 target path
-This is the object prefix path inside your bucket:
-
-```yaml
-s3:
-  endpoint_url: "https://s3.slices-be.eu"
-  bucket: "ilabt.imec.be-project-coock-aida"
-  base_path: "Werf Hoboken/timelapses"
-```
-
-The code will upload objects to this bucket using the `base_path` as a prefix.
-
-#### Local storage paths
-These are the in-container storage locations:
-- `local_storage.path`: where images go
-- `local_storage.state_path`: where state files go
-
-Default values:
-```yaml
-local_storage:
-  path: "/data/images"
-  state_path: "/data/state"
-```
-
-Leave these alone unless you know why you want to change them.
-
-### Step 4: Start the service
-From the project root, run:
-
-```bash
-docker-compose up -d --build
-```
-
-This will:
-1. Build the image
-2. Start the container
-3. Attempt to bring up WireGuard
-4. Start the Python scheduler
-
-### Step 5: Watch the logs
-To check whether startup worked:
-
-```bash
-docker-compose logs -f capture-app
-```
-
-What you want to see:
-- the scheduler started
-- capture jobs are scheduled
-- camera snapshots succeed
-- upload jobs run at the configured time
-
-Press `Ctrl + C` to stop watching logs. This does not stop the container.
-
----
-
-## Where Files Go
-
-Local files are stored in the Docker volume mounted at `/data`.
-
-Inside that volume:
-- `/data/images/DD_MM_YY/` contains snapshot images
-- `/data/state/upload_manifest.json` tracks uploaded files
-- `/data/state/health.json` tracks last successful capture and upload times
-
-Remote files are uploaded to:
-- S3 Bucket: `ilabt.imec.be-project-coock-aida`
-- Object prefix: `Werf Hoboken/timelapses/DD_MM_YY/`
-
----
-
-## Troubleshooting
-
-### "The app started but cameras still do not work"
-Check these first:
-1. Did WireGuard actually come up?
-2. Does the camera snapshot URL work from inside the VPN?
-3. Did you put the right camera IP and path in `snapshot_url`?
-4. Does the camera require username/password?
-
-### "Uploads never happen"
-Check these:
-1. Is `.env` present?
-2. Are `S3_ACCESS_KEY` and `S3_SECRET_KEY` filled in?
-3. Did the local images land in a non-current day folder yet?
-
-### "The container is unhealthy"
-The current health check marks the container unhealthy if:
-- the main process is gone
-- `/data/state/health.json` becomes stale
-
-*(Note: a failed VPN ping to `100.66.241.254` is logged as a warning but does NOT mark the container unhealthy anymore).*
-
-### "I want to manually check the VPN ping"
-If you want to diagnose the WireGuard connection manually from inside the container, run:
-`docker compose exec capture-app ping -c 3 100.66.241.254`
-
-### "Where did my disk space go?"
-Images accumulate under `/data/images`. They are only deleted locally after:
-1. upload succeeded for the folder
-2. the folder was marked complete
-3. the folder is older than `retention_days`
-
-### Stop or reset
-- Stop the service: `docker-compose down`
-- Stop and delete the data volume too: `docker-compose down -v`
